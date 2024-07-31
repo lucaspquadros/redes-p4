@@ -39,26 +39,59 @@ class CamadaEnlace:
             self.callback(datagrama)
 
 
+END = 0xC0
+ESC = 0xDB
+ESC_END = 0xDC
+ESC_ESC = 0xDD
+
 class Enlace:
     def __init__(self, linha_serial):
         self.linha_serial = linha_serial
         self.linha_serial.registrar_recebedor(self.__raw_recv)
+        self.receiving_buffer = bytearray()
+        self.escape_sequence = False
 
     def registrar_recebedor(self, callback):
         self.callback = callback
 
     def enviar(self, datagrama):
-        # TODO: Preencha aqui com o código para enviar o datagrama pela linha
-        # serial, fazendo corretamente a delimitação de quadros e o escape de
-        # sequências especiais, de acordo com o protocolo CamadaEnlace (RFC 1055).
-        pass
+        quadro = bytearray()
+        quadro.append(END)  # Byte de inicio
+        
+        for byte in datagrama:
+            if byte == END:
+                quadro.append(ESC)
+                quadro.append(ESC_END)
+            elif byte == ESC:
+                quadro.append(ESC)
+                quadro.append(ESC_ESC)
+            else:
+                quadro.append(byte)
+        
+        quadro.append(END)  # Byte de fim
+        
+        self.linha_serial.enviar(quadro)
 
     def __raw_recv(self, dados):
-        # TODO: Preencha aqui com o código para receber dados da linha serial.
-        # Trate corretamente as sequências de escape. Quando ler um quadro
-        # completo, repasse o datagrama contido nesse quadro para a camada
-        # superior chamando self.callback. Cuidado pois o argumento dados pode
-        # vir quebrado de várias formas diferentes - por exemplo, podem vir
-        # apenas pedaços de um quadro, ou um pedaço de quadro seguido de um
-        # pedaço de outro, ou vários quadros de uma vez só.
-        pass
+        for byte in dados:
+            if byte == END:
+                if self.receiving_buffer:
+                    try:
+                        self.callback(bytes(self.receiving_buffer))
+                    except Exception:
+                        import traceback
+                        traceback.print_exc()
+                    finally:
+                        self.receiving_buffer = bytearray()
+                        self.escape_sequence = False
+            elif self.escape_sequence:
+                if byte == ESC_END:
+                    self.receiving_buffer.append(END)
+                elif byte == ESC_ESC:
+                    self.receiving_buffer.append(ESC)
+                self.escape_sequence = False
+            elif byte == ESC:
+                self.escape_sequence = True
+            else:
+                self.receiving_buffer.append(byte)
+        
